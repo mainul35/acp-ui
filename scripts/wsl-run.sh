@@ -4,6 +4,10 @@
 set -eu
 export NVM_DIR="$HOME/.nvm"
 . "$NVM_DIR/nvm.sh"
-# WebKitGTK's GPU compositing draws a blank window under WSLg on some drivers; software is reliable
+# Under WSLg's Wayland the window draws but mouse input never reaches the WebKit view, so it runs
+# through WSLg's X server instead. WebKitGTK's GPU paths (compositing, DMA-BUF buffers) have no real
+# GPU behind them there and only add failure modes, so they are off; software drawing is reliable.
+export GDK_BACKEND=x11
 export WEBKIT_DISABLE_COMPOSITING_MODE=1
+export WEBKIT_DISABLE_DMABUF_RENDERER=1
 exec "$HOME/acp-ui-build/src-tauri/target/release/acp-ui" "$@"
