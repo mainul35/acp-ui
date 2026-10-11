@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { canPickFolder, pickFolder, loadKvStore, type KVStore } from './lib/host';
 import { useConfigStore } from './stores/config';
+import { usePluginStore } from './stores/plugins';
 import { useSessionStore } from './stores/session';
 import { initTelemetry } from './lib/telemetry';
 import AgentSelector from './components/AgentSelector.vue';
@@ -121,6 +122,8 @@ onMounted(async () => {
   // Initialize stores
   await configStore.loadConfig();
   await configStore.setupHotReload();
+  // Plugins after the config: a broken one is reported in Settings and never stops the app opening
+  usePluginStore().loadAll().catch(e => console.warn('Plugins could not be loaded:', e));
   await sessionStore.initStore();
   
   const savedCwd = await prefsStore.get<string>('lastCwd');

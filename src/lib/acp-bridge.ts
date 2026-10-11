@@ -46,6 +46,9 @@ function getTrafficStore() {
 /** JSON-RPC method-not-found error code. */
 const JSONRPC_METHOD_NOT_FOUND = -32601;
 
+
+// Requests that may legitimately run for minutes
+const UNTIMED = new Set(['session/prompt', 'session/set_model']);
 export class AcpClientBridge implements Client {
   private transport: AcpTransport;
   /**
@@ -289,7 +292,10 @@ export class AcpClientBridge implements Client {
         reject(e);
       });
 
-      // Timeout after 60 seconds (increased for auth flows)
+      // Timeout after 60 seconds (increased for auth flows). Not for a prompt: an agent's turn
+      // takes as long as the work does, and the first message after a model switch waits for
+      // the new model to load. Cancel is how a turn is stopped.
+      if (UNTIMED.has(method)) return;
       setTimeout(() => {
         if (this.messageResolvers.has(id)) {
           this.messageResolvers.delete(id);

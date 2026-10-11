@@ -10,6 +10,8 @@ import { AcpClientBridge, createAcpClient } from '../lib/acp-bridge';
 import { onAgentStderr, spawnAgent, killAgent } from '../lib/host';
 import { isDesktop } from '../lib/platform';
 import { useConfigStore } from './config';
+import { usePluginStore } from './plugins';
+import type { PromptContext } from '../lib/plugins/types';
 import type { SessionNotification, AuthMethod } from '@agentclientprotocol/sdk';
 
 const STORE_PATH = 'sessions.json';
@@ -68,6 +70,11 @@ export const useSessionStore = defineStore('session', () => {
   // Session models
   const availableModels = ref<ModelInfo[]>([]);
   const currentModelId = ref<string>('');
+
+  // What the agent said it accepts in a prompt (initialize -> agentCapabilities.promptCapabilities),
+  // and its own extra details (_meta), such as how large a picture may be. Plugins read these.
+  const promptCapabilities = ref<{ image?: boolean; audio?: boolean; embeddedContext?: boolean }>({});
+  const capabilitiesMeta = ref<Record<string, unknown>>({});
   
   // Connection cancellation
   let connectionAborted = false;
@@ -416,6 +423,7 @@ export const useSessionStore = defineStore('session', () => {
       });
 
       console.log('Agent initialized:', initResponse);
+      rememberCapabilities(initResponse.agentCapabilities);
 
       // Check if agent supports session loading
       const supportsLoadSession = initResponse.agentCapabilities?.loadSession ?? false;
@@ -619,6 +627,8 @@ export const useSessionStore = defineStore('session', () => {
         },
       });
 
+      rememberCapabilities(initResponse.agentCapabilities);
+
       // Store available auth methods for potential retry
       const availableAuthMethods = initResponse.authMethods || [];
 
@@ -700,29 +710,48 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
-  // Send prompt
+  function rememberCapabilities(capabilities: { promptCapabilities?: object; _meta?: unknown } | undefined) {
+    promptCapabilities.value = (capabilities?.promptCapabilities as typeof promptCapabilities.value) ?? {};
+    capabilitiesMeta.value = (capabilities?._meta as Record<string, unknown>) ?? {};
+  }
+
+  // Send prompt. Plugins see it first: they can add to it (pictures), change the model (routing),
+  // add notes shown under it, or stop it with a reason.
   async function sendPrompt(text: string): Promise<void> {
     if (!acpClient || !currentSession.value) {
       throw new Error('No active session');
     }
 
-    // Add user message
+    const plugins = usePluginStore();
+    const attachments = plugins.takeAttachments();
+    const context: PromptContext = { text, attachments, extraBlocks: [], notes: [] };
+
+    // Shown at once, with its pictures; the notes plugins write are added once they have run
+    const shownId = crypto.randomUUID();
     messages.value.push({
-      id: crypto.randomUUID(),
+      id: shownId,
       role: 'user',
       content: text,
       timestamp: Date.now(),
+      attachments: attachments.map(a => ({ name: a.name, previewUrl: a.previewUrl })),
     });
 
     isLoading.value = true;
     try {
+      await plugins.runBeforePrompt(context);
+      const shown = messages.value.find(m => m.id === shownId);
+      if (shown && context.notes.length) shown.notes = [...context.notes];
+      if (context.cancel) {
+        error.value = context.cancel;
+        return;
+      }
+
       const response = await acpClient.prompt({
         sessionId: currentSession.value.sessionId,
         prompt: [
-          {
-            type: 'text',
-            text,
-          },
+          { type: 'text', text: context.text },
+          ...attachments.map(a => a.block),
+          ...context.extraBlocks,
         ],
       });
 
@@ -734,8 +763,9 @@ export const useSessionStore = defineStore('session', () => {
         stopReason: response.stopReason || 'unknown',
       });
 
-      // Update session title if it's the first message
-      if (messages.value.length === 2 && currentSession.value) {
+      // The session is named after its first message
+      const firstUser = messages.value.find(m => m.role === 'user');
+      if (firstUser?.id === shownId && currentSession.value) {
         currentSession.value.title = text.slice(0, 50) + (text.length > 50 ? '...' : '');
         currentSession.value.lastUpdated = Date.now();
         await saveSessionsToStore();
@@ -934,6 +964,8 @@ export const useSessionStore = defineStore('session', () => {
     availableCommands,
     availableModels,
     currentModelId,
+    promptCapabilities,
+    capabilitiesMeta,
     startupPhase,
     startupLogs,
     startupElapsed,

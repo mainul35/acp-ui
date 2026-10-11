@@ -1,0 +1,36 @@
+{
+  "id": "model-router",
+  "name": "Model router",
+  "version": "1.0.0",
+  "description": "Before each message, a small model reads it and says what kind of work it is - code, a picture, reasoning, a long text, or general - and the session switches to the model best for that.",
+  "author": "mainul35",
+  "main": "index.js",
+  "settings": [
+    { "key": "enabled", "label": "Route each message", "type": "toggle", "default": true },
+    {
+      "key": "endpoint",
+      "label": "Small model's endpoint (OpenAI-compatible)",
+      "type": "text",
+      "default": "https://ai-gateway.mainul35.dev/v1",
+      "placeholder": "https://ai-gateway.mainul35.dev/v1",
+      "help": "Where the small model that reads each message is reached. Your AI gateway, or an Ollama at http://localhost:11434/v1."
+    },
+    {
+      "key": "apiKey",
+      "label": "API key for that endpoint",
+      "type": "password",
+      "default": "",
+      "help": "Your AI gateway key. Leave empty for an endpoint that needs none, such as a local Ollama."
+    },
+    { "key": "classifier", "label": "Small model", "type": "text", "default": "qwen3:1.7b",
+      "help": "Fast and small is the point: it answers one word. The gateway uses qwen3:1.7b for the same job." },
+    { "key": "model_code", "label": "Model for code", "type": "model", "default": "" },
+    { "key": "model_vision", "label": "Model for pictures", "type": "model", "default": "",
+      "help": "Used whenever a picture is attached, without asking the small model: it has to be one that sees images." },
+    { "key": "model_reasoning", "label": "Model for reasoning", "type": "model", "default": "" },
+    { "key": "model_long", "label": "Model for long texts", "type": "model", "default": "" },
+    { "key": "model_general", "label": "Model for everything else", "type": "model", "default": "",
+      "help": "Left on automatic, general questions stay on whichever model is in use: switching costs a model load." },
+    { "key": "showNote", "label": "Say under each message where it was routed", "type": "toggle", "default": true }
+  ]
+}

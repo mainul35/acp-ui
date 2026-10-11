@@ -2,6 +2,7 @@
 import { ref, computed, nextTick, watch } from 'vue';
 import { marked } from 'marked';
 import { useSessionStore } from '../stores/session';
+import { usePluginStore } from '../stores/plugins';
 import { isMobile } from '../lib/platform';
 import ModePicker from './ModePicker.vue';
 import ModelPicker from './ModelPicker.vue';
@@ -9,7 +10,9 @@ import CommandPalette from './CommandPalette.vue';
 import type { SlashCommand } from '../lib/types';
 
 const sessionStore = useSessionStore();
+const pluginStore = usePluginStore();
 const inputText = ref('');
+const dragging = ref(false);
 const messagesContainer = ref<HTMLElement | null>(null);
 const commandPaletteRef = ref<InstanceType<typeof CommandPalette> | null>(null);
 
@@ -55,9 +58,14 @@ watch(messages, async () => {
   }
 }, { deep: true });
 
+const attachments = computed(() => pluginStore.attachments);
+const composerButtons = computed(() => pluginStore.buttons);
+const canSend = computed(() => (!!inputText.value.trim() || attachments.value.length > 0)
+  && !isLoading.value && !isReconnecting.value);
+
 async function handleSend() {
   const text = inputText.value.trim();
-  if (!text || isLoading.value) return;
+  if ((!text && attachments.value.length === 0) || isLoading.value) return;
   
   inputText.value = '';
   try {
@@ -82,6 +90,39 @@ function handleKeyDown(event: KeyboardEvent) {
   if (submitOnEnter && event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     handleSend();
+  }
+}
+
+// Pasting a picture: the default paste is stopped only when the clipboard holds files and a plugin
+// is listening, so ordinary text still pastes as it always did.
+async function handlePaste(event: ClipboardEvent) {
+  if (!event.clipboardData?.files.length) return;
+  event.preventDefault();
+  if (!(await pluginStore.handlePaste(event))) {
+    pluginStore.notify('Nothing here takes pasted files. Install a plugin for it under Settings > Plugins.', 'error');
+  }
+}
+
+function handleDragOver(event: DragEvent) {
+  if (!event.dataTransfer?.types.includes('Files')) return;
+  event.preventDefault();
+  dragging.value = true;
+}
+
+async function handleDrop(event: DragEvent) {
+  dragging.value = false;
+  if (!event.dataTransfer?.files.length) return;
+  event.preventDefault();
+  if (!(await pluginStore.handleDrop(event))) {
+    pluginStore.notify('Nothing here takes dropped files. Install a plugin for it under Settings > Plugins.', 'error');
+  }
+}
+
+async function runButton(onClick: () => void | Promise<void>) {
+  try {
+    await onClick();
+  } catch (e) {
+    pluginStore.notify(e instanceof Error ? e.message : String(e), 'error');
   }
 }
 
@@ -160,7 +201,12 @@ function getStatusIcon(status: string): string {
 </script>
 
 <template>
-  <div class="chat-view">
+  <div
+    :class="['chat-view', { dragging }]"
+    @dragover="handleDragOver"
+    @dragleave="dragging = false"
+    @drop="handleDrop"
+  >
     <div class="chat-header">
       <h2>{{ currentSession?.title || 'Chat' }}</h2>
       <div class="header-right">
@@ -227,17 +273,51 @@ function getStatusIcon(status: string): string {
           class="message-content"
           v-html="renderMarkdown(message.content)"
         />
+
+        <div v-if="message.attachments?.length" class="message-attachments">
+          <img
+            v-for="(attachment, i) in message.attachments"
+            :key="i"
+            v-show="attachment.previewUrl"
+            :src="attachment.previewUrl"
+            :alt="attachment.name"
+            :title="attachment.name"
+          />
+        </div>
+        <ul v-if="message.notes?.length" class="message-notes">
+          <li v-for="(note, i) in message.notes" :key="i">{{ note }}</li>
+        </ul>
       </div>
       
       <!-- Loading indicator -->
       <div v-if="isLoading" class="loading-indicator">
         <span class="spinner"></span>
-        <span>Thinking...</span>
+        <span>{{ pluginStore.status || 'Thinking...' }}</span>
         <button class="cancel-btn" @click="handleCancel">Cancel</button>
       </div>
     </div>
     
+    <div v-if="pluginStore.notice" :class="['plugin-notice', `notice-${pluginStore.notice.kind}`]">
+      {{ pluginStore.notice.message }}
+    </div>
+    <div v-if="attachments.length" class="attachment-strip">
+      <div v-for="attachment in attachments" :key="attachment.id" class="attachment-chip" :title="attachment.name">
+        <img v-if="attachment.previewUrl" :src="attachment.previewUrl" :alt="attachment.name" />
+        <span v-else class="attachment-name">{{ attachment.name }}</span>
+        <button class="attachment-remove" title="Remove" @click="pluginStore.removeAttachment(attachment.id)">×</button>
+      </div>
+    </div>
     <div class="input-container">
+      <div v-if="composerButtons.length" class="composer-buttons">
+        <button
+          v-for="button in composerButtons"
+          :key="`${button.pluginId}:${button.id}`"
+          class="composer-btn"
+          :title="button.title"
+          :disabled="isLoading || isReconnecting"
+          @click="runButton(button.onClick)"
+        >{{ button.icon }}</button>
+      </div>
       <CommandPalette
         ref="commandPaletteRef"
         :commands="availableCommands"
@@ -257,11 +337,12 @@ function getStatusIcon(status: string): string {
         "
         :disabled="isLoading || isReconnecting"
         @keydown="handleKeyDown"
+        @paste="handlePaste"
         rows="3"
       />
       <button 
         class="send-btn"
-        :disabled="!inputText.trim() || isLoading || isReconnecting"
+        :disabled="!canSend"
         @click="handleSend"
       >
         Send
@@ -275,6 +356,109 @@ function getStatusIcon(status: string): string {
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+
+/* Files held over the conversation: say it will take them */
+.chat-view.dragging {
+  outline: 2px dashed var(--text-accent, #0066cc);
+  outline-offset: -6px;
+}
+
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.message-attachments img {
+  max-height: 140px;
+  max-width: 220px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #ccc);
+}
+
+.message-notes {
+  margin: 0.4rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.78rem;
+  color: var(--text-muted, #666);
+}
+
+.attachment-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem 0;
+}
+
+.attachment-chip {
+  position: relative;
+  border: 1px solid var(--border-color, #ccc);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-assistant, #f5f5f5);
+}
+
+.attachment-chip img {
+  display: block;
+  height: 64px;
+  max-width: 110px;
+  object-fit: cover;
+}
+
+.attachment-name {
+  display: block;
+  padding: 0.4rem 1.6rem 0.4rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+.attachment-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.composer-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.composer-btn {
+  width: 2.4rem;
+  height: 2.4rem;
+  border: 1px solid var(--border-color, #ccc);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1.1rem;
+}
+
+.composer-btn:hover:not(:disabled) {
+  border-color: var(--text-accent, #0066cc);
+}
+
+.plugin-notice {
+  margin: 0.5rem 1rem 0;
+  padding: 0.45rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  background: var(--bg-assistant, #f5f5f5);
+}
+
+.plugin-notice.notice-error {
+  color: #b00020;
+  border: 1px solid #f3b5bf;
 }
 
 .chat-header {
