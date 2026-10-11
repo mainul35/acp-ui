@@ -86,6 +86,10 @@ export interface ChatMessage {
   thought?: string;
   timestamp: number;
   toolCalls?: ToolCallInfo[];
+  /** Pictures or files that went with a user's message, shown as thumbnails. */
+  attachments?: { name: string; previewUrl?: string }[];
+  /** Short lines plugins added about the message, e.g. which model it was routed to. */
+  notes?: string[];
 }
 
 export interface ToolCallInfo {

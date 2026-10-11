@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PluginsSection from './PluginsSection.vue';
 import { ref, computed } from 'vue';
 import { useConfigStore } from '../stores/config';
 import { addAgent, removeAgent, updateAgent } from '../lib/host';
@@ -344,6 +345,8 @@ async function handleDelete(name: string) {
             </div>
           </div>
         </section>
+
+        <PluginsSection />
 
         <section class="config-section">
           <h3>Config File</h3>

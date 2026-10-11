@@ -1,0 +1,24 @@
+{
+  "id": "image-attach",
+  "name": "Images",
+  "version": "1.0.0",
+  "description": "Attach pictures to a message: the 📎 button, paste (Ctrl+V), or drag and drop. Sent to the agent as image content.",
+  "author": "mainul35",
+  "main": "index.js",
+  "settings": [
+    {
+      "key": "maxSide",
+      "label": "Shrink pictures larger than (pixels)",
+      "type": "select",
+      "default": "2048",
+      "help": "A full-size screenshot is sent as it is up to this size. Larger pictures are scaled down first, which keeps them under the agent's size limit and costs the model less to read.",
+      "options": [
+        { "value": "1024", "label": "1024" },
+        { "value": "1600", "label": "1600" },
+        { "value": "2048", "label": "2048" },
+        { "value": "4096", "label": "4096" },
+        { "value": "0", "label": "Never shrink" }
+      ]
+    }
+  ]
+}

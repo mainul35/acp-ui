@@ -24,6 +24,22 @@
     {
       "identifier": "fs:allow-mkdir",
       "allow": [{ "path": "**" }]
+    },
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [{ "path": "**" }]
+    },
+    {
+      "identifier": "fs:allow-read-dir",
+      "allow": [{ "path": "$CONFIG/acp-ui/plugins" }, { "path": "$CONFIG/acp-ui/plugins/**" }]
+    },
+    {
+      "identifier": "fs:allow-remove",
+      "allow": [{ "path": "$CONFIG/acp-ui/plugins/**" }]
+    },
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "https://**" }, { "url": "http://**" }]
     }
   ]
 }
